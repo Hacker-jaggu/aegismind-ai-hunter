@@ -10,7 +10,7 @@ AegisMind is a lightweight Python CLI for authorized, unauthenticated web assess
 - Exact hostname allowlisting is mandatory; subdomains are not implicitly included.
 - Only GET and OPTIONS requests are used. Redirects are recorded but never followed automatically.
 - HTML link discovery is bounded; JavaScript is not executed, forms are not submitted, and query-string/action-like URLs are excluded.
-- Page count, HTML bytes, request timeout, and request delay are bounded.
+- Page count is capped at 100, HTML reads at 1 MB per page, request timeout at 1–30 seconds, and request delay at 0.5–10 seconds.
 - TLS certificate verification remains enabled.
 - No brute force, credential attacks, destructive payloads, exploit chains, or data exfiltration.
 - Sensitive response bodies and cookie values are not written to reports.
@@ -33,8 +33,9 @@ Use a model currently available to your provider account. The scanner works with
 
 ## Resource controls
 - --max-pages: maximum pages visited, capped at 100.
-- --delay: minimum delay between requests, never below 0.5 seconds.
-- --max-body-bytes: HTML read cap per page, capped at 1 MB.
+- --delay: request delay clamped to 0.5–10 seconds.
+- --max-body-bytes: HTML read cap per page, clamped to 16 KB–1 MB.
+- REQUEST_TIMEOUT: request timeout clamped to 1–30 seconds.
 - .env options: REQUEST_TIMEOUT, REQUEST_DELAY, MAX_URLS, MAX_BODY_BYTES, AI_API_KEY, AI_BASE_URL, AI_MODEL.
 
 ## Checks
