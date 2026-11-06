@@ -4,8 +4,21 @@ from aegismind.skills.browser_manual import manual_verify
 from aegismind.skills.research import save_research_note
 
 
+class FakeBrowser:
+    def __init__(self, evidence):
+        self.evidence = evidence
+        self.opened = None
+
+    def open(self, url, *, allowed_hosts):
+        self.opened = (url, allowed_hosts)
+
+    def capture_observation(self):
+        return self.evidence
+
+
 def test_browser_unavailable_is_not_claimed_as_performed():
-    result = manual_verify("https://example.test", authorized=True)
+    result = manual_verify("https://example.test", authorized=True,
+                           allowed_hosts={"example.test"})
     assert result.performed is False
     assert result.status == "MANUAL_VERIFICATION_NOT_PERFORMED"
 
@@ -13,6 +26,30 @@ def test_browser_unavailable_is_not_claimed_as_performed():
 def test_browser_requires_authorization():
     result = manual_verify("https://example.test", authorized=False)
     assert result.status == "BLOCKED_UNAUTHORIZED"
+
+
+def test_browser_blocks_out_of_scope_before_opening():
+    driver = FakeBrowser({})
+    result = manual_verify("https://evil.test", authorized=True,
+                           allowed_hosts={"example.test"}, driver=driver)
+    assert result.status == "BLOCKED_OUT_OF_SCOPE"
+    assert driver.opened is None
+
+
+def test_browser_capture_is_redacted_and_allowlist_is_passed():
+    driver = FakeBrowser({
+        "final_url": "https://example.test/profile",
+        "headers": {"Cookie": "sid=secret", "Authorization": "Bearer abc"},
+        "event": "https://analytics.example/reset?token=reset-secret",
+    })
+    result = manual_verify("https://example.test", authorized=True,
+                           allowed_hosts={"example.test"}, driver=driver)
+    assert result.performed is True
+    assert driver.opened[1] == frozenset({"example.test"})
+    assert result.evidence["headers"]["Cookie"] == "[REDACTED]"
+    assert "secret" not in str(result.evidence)
+    assert "abc" not in str(result.evidence)
+    assert "reset-secret" not in str(result.evidence)
 
 
 def test_public_research_note_records_sources_and_no_copied_text(tmp_path):
