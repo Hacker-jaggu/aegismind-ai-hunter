@@ -140,13 +140,13 @@ The research pipeline must be read-only by default. It may collect public metada
 
 ## 6. Current implementation gap
 
-The feature branch currently contains a minimal skill registry, a boolean evidence-gate classifier, basic sensitive-key/string redaction, a bounded static file identifier, a browser-driver Protocol, and metadata-only research-note persistence. These are foundations only.
+The feature branch currently contains a minimal in-memory skill registry, a strict boolean gate classifier that requires caller-supplied evidence-reference strings, expanded starter redaction, bounded static file identification, an exact-host-checked browser-driver Protocol, metadata-only research-note persistence, and bounded scanner timeout/delay configuration. These are foundations only.
 
 Before calling the requested capabilities implemented, the project still needs:
 - a typed skill interface with validated input, explicit dependencies, capability declarations, bounded execution context, and structured results;
-- strict evidence objects per verification gate (not just caller-supplied booleans), plus tests rejecting non-boolean/truthy strings;
-- broader redaction tests for cookie header text, JWT-like values, reset URLs, private data, and nested request/response structures;
-- real browser adapter with exact-host enforcement, read-only defaults, sanitized network capture, DOM observations, and baseline/test comparison;
+- evidence artifact storage and reference resolution: current evidence references are caller-supplied strings and are not independently resolved or verified;
+- broader redaction tests for encoded/multiline secrets, alternate header forms, nested HAR/request/response structures, and personal-data variants;
+- a real browser adapter with redirect blocking before navigation, read-only defaults, sanitized network capture, DOM observations, and baseline/test comparison;
 - optional, version-checked Ghidra/radare2/JADX/pefile/apksigner adapters with fixture-backed support matrices;
 - bounded parsers for ELF/PE/Mach-O/APK/firmware/protocol formats and explicit unsupported-format results;
 - isolated dynamic-debugging and malware-sandbox orchestration; never run unknown samples on the host;
