@@ -29,39 +29,65 @@ def test_scanner_only_cannot_confirm():
     assert result.status is VerificationStatus.INCONCLUSIVE
 
 
-def test_verification_requires_all_gates_for_confirmed():
+def test_verification_requires_all_gates_and_evidence_for_confirmed():
     gates = {name: True for name in (
         "scope_authorized", "reproduced", "baseline_compared", "impact_evidenced",
         "alternatives_reviewed", "repeatable")}
-    assert verify_candidate(gates).status is VerificationStatus.CONFIRMED
+    refs = {name: f"evidence://{name}" for name, value in gates.items() if value}
+    assert verify_candidate(gates, evidence_refs=refs).status is VerificationStatus.CONFIRMED
     gates["repeatable"] = False
-    assert verify_candidate(gates).status is VerificationStatus.LIKELY
+    refs = {name: f"evidence://{name}" for name, value in gates.items() if value}
+    assert verify_candidate(gates, evidence_refs=refs).status is VerificationStatus.LIKELY
 
 
+def test_missing_evidence_refs_prevent_confirmation():
+    gates = {name: True for name in (
+        "scope_authorized", "reproduced", "baseline_compared", "impact_evidenced",
+        "alternatives_reviewed", "repeatable")}
+    assert verify_candidate(gates).status is VerificationStatus.INCONCLUSIVE
 
-def test_false_positive_requires_explicit_contradictory_evidence():
+
+def test_truthy_strings_are_not_accepted_as_verification_gates():
+    with pytest.raises(TypeError):
+        verify_candidate({"scope_authorized": "false"})
+
+
+def test_false_positive_requires_contradiction_and_evidence():
     gates = {
         "scope_authorized": True, "reproduced": True, "baseline_compared": True,
         "impact_evidenced": False, "alternatives_reviewed": True, "repeatable": False,
         "claim_contradicted": True,
     }
-    assert verify_candidate(gates).status is VerificationStatus.FALSE_POSITIVE
+    refs = {name: f"evidence://{name}" for name, value in gates.items() if value}
+    assert verify_candidate(gates, evidence_refs=refs).status is VerificationStatus.FALSE_POSITIVE
+
 
 def test_unscoped_candidate_is_not_confirmed():
     gates = {name: True for name in (
         "scope_authorized", "reproduced", "baseline_compared", "impact_evidenced",
         "alternatives_reviewed", "repeatable")}
     gates["scope_authorized"] = False
-    assert verify_candidate(gates).status is VerificationStatus.INCONCLUSIVE
+    refs = {name: f"evidence://{name}" for name, value in gates.items() if value}
+    assert verify_candidate(gates, evidence_refs=refs).status is VerificationStatus.INCONCLUSIVE
 
 
-def test_redaction_nested_and_strings(tmp_path):
-    sample = {"Cookie": "sid=secret", "headers": {"Authorization": "Bearer abc"},
-              "note": "api_key=xyz"}
+def test_redaction_nested_headers_urls_and_jwt(tmp_path):
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturevalue123456"
+    sample = {
+        "Cookie": "sid=secret",
+        "headers": {"Authorization": "Bearer abc"},
+        "note": "Cookie: sid=secret\nAuthorization: Bearer abc\nhttps://example.test/reset?token=reset-secret",
+        "jwt": jwt,
+        "api_note": "api_key=xyz",
+    }
     safe = redact_sensitive(sample)
     assert safe["Cookie"] == "[REDACTED]"
     assert safe["headers"]["Authorization"] == "[REDACTED]"
-    assert "xyz" not in safe["note"]
+    assert "secret" not in str(safe)
+    assert "abc" not in str(safe)
+    assert "reset-secret" not in str(safe)
+    assert "xyz" not in str(safe)
+    assert jwt not in str(safe)
     path = write_evidence(tmp_path / "evidence.json", sample)
     saved = json.loads(path.read_text())
     assert "abc" not in path.read_text()
