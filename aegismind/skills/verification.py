@@ -26,7 +26,7 @@ class VerificationResult:
 
 REQUIRED_GATES = (
     "scope_authorized", "reproduced", "baseline_compared",
-    "impact_evidenced", "alternatives_reviewed", "repeatable",
+    "impact_evidenced", "alternatives_reviewed", "repeatable", "claim_contradicted",
 )
 
 
@@ -39,14 +39,14 @@ def verify_candidate(gates: Mapping[str, bool], *, scanner_only: bool = False) -
     if not normalized["scope_authorized"]:
         return VerificationResult(VerificationStatus.INCONCLUSIVE, "LOW", normalized,
                                  "Authorization and exact scope have not been established.")
+    if normalized["claim_contradicted"] and normalized["baseline_compared"] and normalized["alternatives_reviewed"]:
+        return VerificationResult(VerificationStatus.FALSE_POSITIVE, "HIGH", normalized,
+                                 "Controlled evidence contradicts the stated vulnerability claim.")
     if normalized["reproduced"] and normalized["baseline_compared"] and normalized["impact_evidenced"] and normalized["alternatives_reviewed"] and normalized["repeatable"]:
         return VerificationResult(VerificationStatus.CONFIRMED, "HIGH", normalized,
                                  "All independent verification gates have supporting evidence.")
     if normalized["reproduced"] and normalized["baseline_compared"] and normalized["alternatives_reviewed"]:
         return VerificationResult(VerificationStatus.LIKELY, "MEDIUM", normalized,
                                  "Reproduced and compared, but impact or repeatability evidence is incomplete.")
-    if normalized["reproduced"] and normalized["alternatives_reviewed"] and normalized["impact_evidenced"] is False and normalized["baseline_compared"]:
-        return VerificationResult(VerificationStatus.FALSE_POSITIVE, "MEDIUM", normalized,
-                                 "Controlled comparison did not support the claimed impact.")
     return VerificationResult(VerificationStatus.INCONCLUSIVE, "LOW", normalized,
                              "Insufficient independent evidence to confirm or reject the candidate.")
