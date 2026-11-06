@@ -38,6 +38,15 @@ def test_verification_requires_all_gates_for_confirmed():
     assert verify_candidate(gates).status is VerificationStatus.LIKELY
 
 
+
+def test_false_positive_requires_explicit_contradictory_evidence():
+    gates = {
+        "scope_authorized": True, "reproduced": True, "baseline_compared": True,
+        "impact_evidenced": False, "alternatives_reviewed": True, "repeatable": False,
+        "claim_contradicted": True,
+    }
+    assert verify_candidate(gates).status is VerificationStatus.FALSE_POSITIVE
+
 def test_unscoped_candidate_is_not_confirmed():
     gates = {name: True for name in (
         "scope_authorized", "reproduced", "baseline_compared", "impact_evidenced",
