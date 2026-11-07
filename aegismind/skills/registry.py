@@ -82,7 +82,7 @@ class SkillRegistry:
     def run(
         self, skill_id: str, *, approved: bool = False,
         authorization_grant=None, allowed_hosts=(), authorization_methods=("GET", "OPTIONS"),
-        now=None, **kwargs
+        authorization_request_budget=None, now=None, **kwargs
     ):
         skill = self.get(skill_id)
         if not approved:
@@ -94,8 +94,11 @@ class SkillRegistry:
         if skill.network_access or skill.action_class == "network_passive":
             if authorization_grant is None:
                 raise PermissionError("a current exact-host authorization grant is required")
+            request_count = skill.estimated_requests if authorization_request_budget is None else authorization_request_budget
+            if type(request_count) is not int or request_count < skill.estimated_requests:
+                raise PermissionError("authorization request budget is below the skill's declared estimate")
             authorization_grant.validate(
                 allowed_hosts, methods=authorization_methods,
-                request_count=skill.estimated_requests, now=now,
+                request_count=request_count, now=now,
             )
         return skill.runner(**kwargs)
