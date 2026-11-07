@@ -16,7 +16,7 @@ This branch adds a deterministic skill planner, exact-host authorization grants,
 
 ## Scheduled-job limitations
 
-The current scheduler is an in-memory library interface. The embedding application must call run_due() and supply a live authorization revalidation callback. Jobs do not survive process restart; no persistent scheduler, cron integration, background service, desktop UI, or notification channel is included. The scheduler passes a request budget to a trusted callback, but cannot sandbox arbitrary callback code or forcibly stop a callback that ignores its budget. Use only callbacks that enforce their own network, time, and resource limits.
+The current scheduler is an in-memory library interface. The embedding application must call run_due() and supply a live authorization revalidation callback. Jobs do not survive process restart; no persistent scheduler, cron integration, background service, desktop UI, or notification channel is included. Only registered network_passive skills can be scheduled. The scheduler invokes the registry with the current grant and request budget; the skill runner must still enforce its actual per-request budget. The registry cannot sandbox arbitrary callback code or forcibly stop a runner that ignores its limits. Use only callbacks that enforce their own network, time, and resource limits.
 
 ## Not yet implemented
 
