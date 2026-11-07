@@ -173,10 +173,11 @@ def execute_plan(
         raise PermissionError("explicit user approval is required before plan execution")
     if not plan.ready or plan.uncovered_capabilities:
         raise RuntimeError("incomplete decision plan cannot be executed")
-    current = now or datetime.now(timezone.utc)
+    fixed_now = now
     results = []
     kwargs_by_skill = runner_kwargs or {}
     for step in plan.steps:
+        current = fixed_now or datetime.now(timezone.utc)
         if step.network_access:
             if authorization_grant is None or authorization_grant.reference != plan.authorization_reference:
                 raise PermissionError("the original authorization grant is required")
