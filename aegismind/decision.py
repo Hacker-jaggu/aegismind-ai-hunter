@@ -189,6 +189,7 @@ def execute_plan(
             authorization_grant=authorization_grant,
             allowed_hosts=plan.allowed_hosts,
             authorization_methods=plan.required_methods,
+            authorization_request_budget=step.estimated_requests,
             now=current,
             **kwargs_by_skill.get(step.skill_id, {})
         )
