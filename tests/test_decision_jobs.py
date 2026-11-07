@@ -83,7 +83,7 @@ def test_planner_never_selects_active_or_destructive_skills():
     registry.register(Skill(
         "active-check", "1.0.0", "Active test",
         runner=lambda: "should not run", capabilities=("active.test",),
-        action_class="active", network_access=True,
+        action_class="active", network_access=True, estimated_requests=1,
     ))
     request = PlanRequest(
         "Run active test", ("active.test",), ResourceBudget(),
