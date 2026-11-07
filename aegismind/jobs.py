@@ -70,6 +70,10 @@ class JobScheduler:
             raise ValueError("request_budget must cover the skill's declared request estimate")
         if runner_kwargs is not None and not isinstance(runner_kwargs, dict):
             raise TypeError("runner_kwargs must be a dictionary")
+        reserved = {"approved", "authorization_grant", "allowed_hosts", "authorization_methods",
+                    "authorization_request_budget", "now"}
+        if reserved.intersection(runner_kwargs or {}):
+            raise ValueError("runner_kwargs contains reserved authorization controls")
         hosts = normalize_host_list(allowed_hosts)
         authorization_grant.validate(
             hosts, methods=("GET", "OPTIONS"), request_count=request_budget, now=current
@@ -114,12 +118,12 @@ class JobScheduler:
         """Run each due job at most once after fresh grant and external authorization checks."""
         if not callable(revalidate):
             raise TypeError("an authorization revalidation callback is required")
-        current = now or datetime.now(timezone.utc)
-        if current.tzinfo is None or current.utcoffset() is None:
+        fixed_now = now
+        if fixed_now is not None and (fixed_now.tzinfo is None or fixed_now.utcoffset() is None):
             raise ValueError("run time must be timezone-aware")
-        current = current.astimezone(timezone.utc)
         events = []
         for job in sorted(self._jobs.values(), key=lambda item: (item.next_run_at, item.job_id)):
+            current = (fixed_now or datetime.now(timezone.utc)).astimezone(timezone.utc)
             if job.status != "SCHEDULED" or job.next_run_at > current:
                 continue
             if current >= job.expires_at:
@@ -142,19 +146,20 @@ class JobScheduler:
                 events.append({"job_id": job.job_id, "status": job.status})
                 continue
             try:
+                execution_time = (fixed_now or datetime.now(timezone.utc)).astimezone(timezone.utc)
                 result = self._registry.run(
                     job.skill_id, approved=True, authorization_grant=job._grant,
                     allowed_hosts=job.allowed_hosts, authorization_methods=("GET", "OPTIONS"),
-                    authorization_request_budget=job.request_budget, now=current,
+                    authorization_request_budget=job.request_budget, now=execution_time,
                     **job._runner_kwargs,
                 )
                 job.runs_completed += 1
-                job.last_run_at = current
+                job.last_run_at = execution_time
                 job.last_error = None
                 if job.runs_completed >= job.max_runs:
                     job.status = "COMPLETED"
                 else:
-                    next_run = current + timedelta(seconds=job.interval_seconds)
+                    next_run = execution_time + timedelta(seconds=job.interval_seconds)
                     if next_run >= job.expires_at:
                         job.status = "COMPLETED"
                     else:
