@@ -183,7 +183,11 @@ def execute_plan(
                 request_count=step.estimated_requests, now=current,
             )
         result = registry.run(
-            step.skill_id, approved=True, **kwargs_by_skill.get(step.skill_id, {})
+            step.skill_id, approved=True,
+            authorization_grant=authorization_grant,
+            allowed_hosts=plan.allowed_hosts,
+            now=current,
+            **kwargs_by_skill.get(step.skill_id, {})
         )
         results.append({"skill_id": step.skill_id, "result": result})
     return results
