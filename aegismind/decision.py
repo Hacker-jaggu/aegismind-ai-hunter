@@ -48,9 +48,11 @@ class PlanRequest:
         object.__setattr__(self, "required_capabilities", capabilities)
         if self.allowed_hosts:
             object.__setattr__(self, "allowed_hosts", normalize_host_list(self.allowed_hosts))
+        if isinstance(self.required_methods, (str, bytes)):
+            raise TypeError("required_methods must be a collection of method names")
         methods = tuple(sorted({str(method).upper() for method in self.required_methods}))
-        if not methods:
-            raise ValueError("at least one HTTP method must be specified")
+        if not methods or not set(methods).issubset({"GET", "OPTIONS"}):
+            raise ValueError("only GET and OPTIONS are supported by this passive planner")
         object.__setattr__(self, "required_methods", methods)
 
 
@@ -186,6 +188,7 @@ def execute_plan(
             step.skill_id, approved=True,
             authorization_grant=authorization_grant,
             allowed_hosts=plan.allowed_hosts,
+            authorization_methods=plan.required_methods,
             now=current,
             **kwargs_by_skill.get(step.skill_id, {})
         )
