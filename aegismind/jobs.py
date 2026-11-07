@@ -1,4 +1,4 @@
-"""Opt-in, in-memory scheduled-job interface; it creates no background worker."""
+"""Opt-in, in-memory scheduled jobs for registered passive network skills."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -7,6 +7,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from .authorization import AuthorizationGrant, normalize_host_list
+from .skills.registry import SkillRegistry
 
 MIN_INTERVAL_SECONDS = 24 * 60 * 60
 MAX_INTERVAL_SECONDS = 365 * 24 * 60 * 60
@@ -30,20 +31,23 @@ class ScheduledJob:
     last_run_at: datetime | None = None
     last_error: str | None = None
     _grant: AuthorizationGrant = field(repr=False, default=None)
-    _callback: Callable[..., Any] = field(repr=False, default=None)
+    _runner_kwargs: dict[str, Any] = field(repr=False, default_factory=dict)
 
 
 class JobScheduler:
-    """Jobs are visible/cancellable and run only when the host app calls run_due()."""
+    """Visible/cancellable jobs; execution occurs only when the host calls run_due()."""
 
-    def __init__(self):
+    def __init__(self, registry: SkillRegistry):
+        if not isinstance(registry, SkillRegistry):
+            raise TypeError("JobScheduler requires a SkillRegistry")
+        self._registry = registry
         self._jobs: dict[str, ScheduledJob] = {}
 
     def schedule(
-        self, *, name: str, skill_id: str, callback: Callable[[AuthorizationGrant, int], Any],
-        authorization_grant: AuthorizationGrant, allowed_hosts, interval_seconds: int,
-        max_runs: int, request_budget: int, opt_in: bool, expires_at: datetime | None = None,
-        now: datetime | None = None,
+        self, *, name: str, skill_id: str, authorization_grant: AuthorizationGrant,
+        allowed_hosts, interval_seconds: int, max_runs: int, request_budget: int,
+        opt_in: bool, runner_kwargs: dict[str, Any] | None = None,
+        expires_at: datetime | None = None, now: datetime | None = None,
     ) -> ScheduledJob:
         current = now or datetime.now(timezone.utc)
         if current.tzinfo is None or current.utcoffset() is None:
@@ -53,16 +57,23 @@ class JobScheduler:
             raise PermissionError("explicit opt-in is required to schedule a job")
         if not isinstance(name, str) or not name.strip() or not isinstance(skill_id, str) or not skill_id.strip():
             raise ValueError("job name and skill_id are required")
-        if not callable(callback):
-            raise TypeError("a real job callback is required; no simulation is provided")
+        skill = self._registry.get(skill_id)
+        if skill.runner is None:
+            raise RuntimeError("scheduled skill has no installed runner")
+        if skill.action_class != "network_passive" or not skill.network_access:
+            raise PermissionError("only registered network_passive skills may be scheduled")
         if type(interval_seconds) is not int or not MIN_INTERVAL_SECONDS <= interval_seconds <= MAX_INTERVAL_SECONDS:
             raise ValueError("interval must be between 1 day and 365 days")
         if type(max_runs) is not int or not 1 <= max_runs <= MAX_JOB_RUNS:
             raise ValueError(f"max_runs must be between 1 and {MAX_JOB_RUNS}")
-        if type(request_budget) is not int or request_budget < 1:
-            raise ValueError("request_budget must be a positive integer")
+        if type(request_budget) is not int or request_budget < skill.estimated_requests:
+            raise ValueError("request_budget must cover the skill's declared request estimate")
+        if runner_kwargs is not None and not isinstance(runner_kwargs, dict):
+            raise TypeError("runner_kwargs must be a dictionary")
         hosts = normalize_host_list(allowed_hosts)
-        authorization_grant.validate(hosts, methods=("GET", "OPTIONS"), request_count=request_budget, now=current)
+        authorization_grant.validate(
+            hosts, methods=("GET", "OPTIONS"), request_count=request_budget, now=current
+        )
         end = expires_at or authorization_grant.expires_at
         if end.tzinfo is None or end.utcoffset() is None:
             raise ValueError("job expiry must be timezone-aware")
@@ -76,7 +87,8 @@ class JobScheduler:
             job_id=uuid4().hex, name=name.strip(), skill_id=skill_id.strip(),
             allowed_hosts=hosts, authorization_reference=authorization_grant.reference,
             interval_seconds=interval_seconds, max_runs=max_runs, request_budget=request_budget,
-            next_run_at=next_run, expires_at=end, _grant=authorization_grant, _callback=callback,
+            next_run_at=next_run, expires_at=end, _grant=authorization_grant,
+            _runner_kwargs=dict(runner_kwargs or {}),
         )
         self._jobs[job.job_id] = job
         return job
@@ -99,7 +111,7 @@ class JobScheduler:
         } for job in sorted(self._jobs.values(), key=lambda item: item.job_id)]
 
     def run_due(self, *, revalidate: Callable[[AuthorizationGrant], bool], now: datetime | None = None):
-        """Run each due job at most once; authorization is revalidated immediately before callback."""
+        """Run each due job at most once after fresh grant and external authorization checks."""
         if not callable(revalidate):
             raise TypeError("an authorization revalidation callback is required")
         current = now or datetime.now(timezone.utc)
@@ -119,18 +131,23 @@ class JobScheduler:
                     job.allowed_hosts, methods=("GET", "OPTIONS"),
                     request_count=job.request_budget, now=current,
                 )
-            except (PermissionError, ValueError):
-                job.status = "BLOCKED"
-                job.last_error = "AUTHORIZATION_INVALID_OR_EXPIRED"
-                events.append({"job_id": job.job_id, "status": job.status})
-                continue
-            try:
                 if revalidate(job._grant) is not True:
                     job.status = "BLOCKED"
                     job.last_error = "AUTHORIZATION_REVALIDATION_FAILED"
                     events.append({"job_id": job.job_id, "status": job.status})
                     continue
-                result = job._callback(job._grant, job.request_budget)
+            except Exception:
+                job.status = "BLOCKED"
+                job.last_error = "AUTHORIZATION_REVALIDATION_ERROR"
+                events.append({"job_id": job.job_id, "status": job.status})
+                continue
+            try:
+                result = self._registry.run(
+                    job.skill_id, approved=True, authorization_grant=job._grant,
+                    allowed_hosts=job.allowed_hosts, authorization_methods=("GET", "OPTIONS"),
+                    authorization_request_budget=job.request_budget, now=current,
+                    **job._runner_kwargs,
+                )
                 job.runs_completed += 1
                 job.last_run_at = current
                 job.last_error = None
@@ -143,6 +160,10 @@ class JobScheduler:
                     else:
                         job.next_run_at = next_run
                 events.append({"job_id": job.job_id, "status": "RAN", "result": result})
+            except PermissionError:
+                job.status = "BLOCKED"
+                job.last_error = "EXECUTION_AUTHORIZATION_REJECTED"
+                events.append({"job_id": job.job_id, "status": job.status})
             except Exception as exc:
                 job.status = "FAILED"
                 job.last_error = type(exc).__name__
