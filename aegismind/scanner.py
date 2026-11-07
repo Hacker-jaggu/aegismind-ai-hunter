@@ -1,3 +1,4 @@
+import math
 import os, time
 from datetime import datetime, timezone
 import requests
@@ -10,16 +11,25 @@ from .ai_review import review_findings
 class Scanner:
     def __init__(self, allowed_hosts, max_urls=None, delay=None, max_body_bytes=None):
         self.allowed_hosts = {h.lower().rstrip(".") for h in allowed_hosts}
-        self.timeout = float(os.getenv("REQUEST_TIMEOUT", "10"))
-        self.delay = max(0.5, float(delay if delay is not None else os.getenv("REQUEST_DELAY", "1.0")))
+
+        raw_timeout = float(os.getenv("REQUEST_TIMEOUT", "10"))
+        if not math.isfinite(raw_timeout) or raw_timeout <= 0:
+            raise ValueError("REQUEST_TIMEOUT must be a finite positive number")
+        self.timeout = min(30.0, max(1.0, raw_timeout))
+
+        raw_delay = float(delay if delay is not None else os.getenv("REQUEST_DELAY", "1.0"))
+        if not math.isfinite(raw_delay) or raw_delay < 0:
+            raise ValueError("REQUEST_DELAY/--delay must be a finite non-negative number")
+        self.delay = min(10.0, max(0.5, raw_delay))
+
         self.max_urls = min(100, max(1, int(max_urls if max_urls is not None else os.getenv("MAX_URLS", "30"))))
         self.max_body_bytes = min(1_000_000, max(16_384, int(max_body_bytes or os.getenv("MAX_BODY_BYTES", "262144"))))
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "AegisMind-AI-Hunter/0.2 (+authorized security assessment)"})
 
     def request(self, method, url):
-        if method not in {"GET", "OPTIONS", "HEAD"}:
-            raise ValueError("Only safe observation methods are enabled")
+        if method not in {"GET", "OPTIONS"}:
+            raise ValueError("Only GET and OPTIONS observation methods are enabled")
         if not in_scope(url, self.allowed_hosts):
             raise ValueError("Out-of-scope URL blocked")
         time.sleep(self.delay)
