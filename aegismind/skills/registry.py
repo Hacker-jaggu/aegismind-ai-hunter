@@ -37,13 +37,13 @@ class Skill:
             raise ValueError("network_passive skills must declare network_access=True")
         if self.network_access and self.action_class == "local_passive":
             raise ValueError("local_passive skills cannot declare network access")
-        if self.network_access and self.estimated_requests < 1:
-            raise ValueError("network skills must declare a positive estimated_requests budget")
         for name in ("estimated_requests", "estimated_runtime_seconds", "estimated_memory_mb"):
             value = getattr(self, name)
             minimum = 0 if name == "estimated_requests" else 1
             if type(value) is not int or value < minimum:
                 raise ValueError(f"{name} must be an integer >= {minimum}")
+        if self.network_access and self.estimated_requests < 1:
+            raise ValueError("network skills must declare a positive estimated_requests budget")
         capabilities = tuple(sorted({str(item).strip().lower() for item in self.capabilities if str(item).strip()}))
         object.__setattr__(self, "capabilities", capabilities)
 
@@ -55,6 +55,8 @@ class SkillRegistry:
         self._skills: dict[str, Skill] = {}
 
     def register(self, skill: Skill) -> None:
+        if not isinstance(skill, Skill):
+            raise TypeError("only validated Skill instances may be registered")
         if skill.skill_id in self._skills:
             raise ValueError(f"skill already registered: {skill.skill_id}")
         self._skills[skill.skill_id] = skill
