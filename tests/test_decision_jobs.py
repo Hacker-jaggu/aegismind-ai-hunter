@@ -19,6 +19,17 @@ def make_grant(*, hosts=("example.test",), expires=None, max_requests=50):
     )
 
 
+def make_network_registry(runner):
+    registry = SkillRegistry()
+    registry.register(Skill(
+        "http-passive", "1.0.0", "Passive HTTP observations",
+        runner=runner, capabilities=("http.headers",),
+        action_class="network_passive", network_access=True,
+        estimated_requests=5, estimated_runtime_seconds=20, estimated_memory_mb=64,
+    ))
+    return registry
+
+
 def test_hostname_normalization_and_wildcard_rejection():
     assert normalize_hostname("Example.TEST.") == "example.test"
     assert normalize_hostname("bücher.example") == "xn--bcher-kva.example"
@@ -65,8 +76,7 @@ def test_plan_blocks_network_skill_without_authorization():
     registry.register(Skill(
         "http-passive", "1.0.0", "Passive HTTP observations",
         runner=lambda: "must not run", capabilities=("http.headers",),
-        action_class="network_passive", network_access=True,
-        estimated_requests=2,
+        action_class="network_passive", network_access=True, estimated_requests=2,
     ))
     request = PlanRequest(
         "Review HTTP posture", ("http.headers",),
@@ -128,15 +138,15 @@ def test_execute_plan_requires_approval_and_revalidates_grant():
     assert calls == ["approved"]
 
 
-def test_registry_direct_network_run_requires_grant():
-    registry = SkillRegistry()
-    registry.register(Skill(
-        "http-passive", "1.0.0", "Passive HTTP observations",
-        runner=lambda: "ran", action_class="network_passive",
-        network_access=True, estimated_requests=2,
-    ))
+def test_registry_direct_network_run_requires_grant_and_budget():
+    registry = make_network_registry(lambda: "ran")
     with pytest.raises(PermissionError):
         registry.run("http-passive", approved=True)
+    with pytest.raises(PermissionError):
+        registry.run(
+            "http-passive", approved=True, authorization_grant=make_grant(),
+            allowed_hosts=("example.test",), authorization_request_budget=2, now=NOW,
+        )
     assert registry.run(
         "http-passive", approved=True, authorization_grant=make_grant(),
         allowed_hosts=("example.test",), now=NOW,
@@ -144,19 +154,19 @@ def test_registry_direct_network_run_requires_grant():
 
 
 def test_scheduler_requires_opt_in_and_bounded_daily_interval():
-    scheduler = JobScheduler()
+    registry = make_network_registry(lambda: "ok")
+    scheduler = JobScheduler(registry)
     grant = make_grant()
-    callback = lambda auth, budget: "ok"
     with pytest.raises(PermissionError):
         scheduler.schedule(
-            name="daily check", skill_id="http-passive", callback=callback,
+            name="daily check", skill_id="http-passive",
             authorization_grant=grant, allowed_hosts=("example.test",),
             interval_seconds=MIN_INTERVAL_SECONDS, max_runs=2,
             request_budget=10, opt_in=False, now=NOW,
         )
     with pytest.raises(ValueError):
         scheduler.schedule(
-            name="fast check", skill_id="http-passive", callback=callback,
+            name="fast check", skill_id="http-passive",
             authorization_grant=grant, allowed_hosts=("example.test",),
             interval_seconds=3600, max_runs=2, request_budget=10,
             opt_in=True, now=NOW,
@@ -164,22 +174,20 @@ def test_scheduler_requires_opt_in_and_bounded_daily_interval():
 
 
 def test_scheduler_revalidates_before_each_run_and_stops_at_max_runs():
-    scheduler = JobScheduler()
-    grant = make_grant()
     calls = []
+    registry = make_network_registry(lambda: calls.append("ran") or "ok")
+    scheduler = JobScheduler(registry)
+    grant = make_grant()
     job = scheduler.schedule(
         name="daily passive check", skill_id="http-passive",
-        callback=lambda auth, budget: calls.append((auth.reference, budget)) or "ok",
         authorization_grant=grant, allowed_hosts=("example.test",),
         interval_seconds=MIN_INTERVAL_SECONDS, max_runs=2,
         request_budget=10, opt_in=True, now=NOW,
     )
-    first_due = NOW + timedelta(days=1)
-    first = scheduler.run_due(revalidate=lambda auth: True, now=first_due)
+    first = scheduler.run_due(revalidate=lambda auth: True, now=NOW + timedelta(days=1))
     assert first[0]["status"] == "RAN"
     assert job.runs_completed == 1
-    second_due = NOW + timedelta(days=2)
-    second = scheduler.run_due(revalidate=lambda auth: True, now=second_due)
+    second = scheduler.run_due(revalidate=lambda auth: True, now=NOW + timedelta(days=2))
     assert second[0]["status"] == "RAN"
     assert job.status == "COMPLETED"
     assert len(calls) == 2
@@ -187,31 +195,29 @@ def test_scheduler_revalidates_before_each_run_and_stops_at_max_runs():
 
 
 def test_scheduler_blocks_without_current_external_revalidation():
-    scheduler = JobScheduler()
-    grant = make_grant()
     calls = []
+    registry = make_network_registry(lambda: calls.append(True))
+    scheduler = JobScheduler(registry)
     job = scheduler.schedule(
         name="daily passive check", skill_id="http-passive",
-        callback=lambda auth, budget: calls.append(True),
-        authorization_grant=grant, allowed_hosts=("example.test",),
+        authorization_grant=make_grant(), allowed_hosts=("example.test",),
         interval_seconds=MIN_INTERVAL_SECONDS, max_runs=2,
         request_budget=10, opt_in=True, now=NOW,
     )
-    events = scheduler.run_due(
-        revalidate=lambda auth: False, now=NOW + timedelta(days=1),
-    )
+    events = scheduler.run_due(revalidate=lambda auth: False, now=NOW + timedelta(days=1))
     assert events[0]["status"] == "BLOCKED"
     assert job.last_error == "AUTHORIZATION_REVALIDATION_FAILED"
     assert calls == []
 
 
 def test_scheduler_is_visible_and_cancellable():
-    scheduler = JobScheduler()
+    registry = make_network_registry(lambda: None)
+    scheduler = JobScheduler(registry)
     job = scheduler.schedule(
         name="daily passive check", skill_id="http-passive",
-        callback=lambda auth, budget: None, authorization_grant=make_grant(),
-        allowed_hosts=("example.test",), interval_seconds=MIN_INTERVAL_SECONDS,
-        max_runs=2, request_budget=10, opt_in=True, now=NOW,
+        authorization_grant=make_grant(), allowed_hosts=("example.test",),
+        interval_seconds=MIN_INTERVAL_SECONDS, max_runs=2,
+        request_budget=10, opt_in=True, now=NOW,
     )
     listed = scheduler.list_jobs()
     assert listed[0]["job_id"] == job.job_id
@@ -222,15 +228,32 @@ def test_scheduler_is_visible_and_cancellable():
 
 
 def test_scheduler_cannot_outlive_authorization_grant():
-    scheduler = JobScheduler()
+    registry = make_network_registry(lambda: None)
+    scheduler = JobScheduler(registry)
     grant = make_grant(expires=NOW + timedelta(days=2))
     with pytest.raises(ValueError):
         scheduler.schedule(
             name="long-lived job", skill_id="http-passive",
-            callback=lambda auth, budget: None, authorization_grant=grant,
-            allowed_hosts=("example.test",), interval_seconds=MIN_INTERVAL_SECONDS,
-            max_runs=5, request_budget=10, opt_in=True,
+            authorization_grant=grant, allowed_hosts=("example.test",),
+            interval_seconds=MIN_INTERVAL_SECONDS, max_runs=5,
+            request_budget=10, opt_in=True,
             expires_at=NOW + timedelta(days=3), now=NOW,
+        )
+
+
+def test_scheduler_rejects_active_skill():
+    registry = SkillRegistry()
+    registry.register(Skill(
+        "active-check", "1.0.0", "Active test", runner=lambda: None,
+        action_class="active", network_access=True, estimated_requests=1,
+    ))
+    scheduler = JobScheduler(registry)
+    with pytest.raises(PermissionError):
+        scheduler.schedule(
+            name="unsafe", skill_id="active-check",
+            authorization_grant=make_grant(), allowed_hosts=("example.test",),
+            interval_seconds=MIN_INTERVAL_SECONDS, max_runs=1,
+            request_budget=10, opt_in=True, now=NOW,
         )
 
 
