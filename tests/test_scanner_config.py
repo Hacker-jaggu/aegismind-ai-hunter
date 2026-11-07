@@ -21,3 +21,11 @@ def test_negative_delay_is_rejected(monkeypatch):
     monkeypatch.setenv("REQUEST_DELAY", "-1")
     with pytest.raises(ValueError):
         Scanner({"example.test"})
+
+
+def test_scanner_rejects_methods_outside_passive_allowlist():
+    scanner = Scanner({"example.test"})
+    with pytest.raises(ValueError):
+        scanner.request("HEAD", "https://example.test/")
+    with pytest.raises(ValueError):
+        scanner.request("DELETE", "https://example.test/")
