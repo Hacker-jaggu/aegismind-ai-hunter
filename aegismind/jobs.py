@@ -70,6 +70,8 @@ class JobScheduler:
             raise ValueError("request_budget must cover the skill's declared request estimate")
         if runner_kwargs is not None and not isinstance(runner_kwargs, dict):
             raise TypeError("runner_kwargs must be a dictionary")
+        if any(not isinstance(key, str) for key in (runner_kwargs or {})):
+            raise TypeError("runner_kwargs keys must be strings")
         reserved = {"approved", "authorization_grant", "allowed_hosts", "authorization_methods",
                     "authorization_request_budget", "now"}
         if reserved.intersection(runner_kwargs or {}):
