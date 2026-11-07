@@ -32,6 +32,8 @@ def normalize_hostname(host: str) -> str:
 
 
 def normalize_host_list(hosts) -> tuple[str, ...]:
+    if isinstance(hosts, (str, bytes)):
+        raise TypeError("hosts must be a collection of exact hostnames, not one string")
     values = {normalize_hostname(host) for host in hosts}
     if not values:
         raise ValueError("at least one exact authorized hostname is required")
@@ -56,6 +58,8 @@ class AuthorizationGrant:
             raise ValueError("expires_at must be timezone-aware")
         if type(self.max_requests) is not int or not 1 <= self.max_requests <= 5000:
             raise ValueError("max_requests must be an integer between 1 and 5000")
+        if isinstance(self.allowed_methods, (str, bytes)):
+            raise TypeError("allowed_methods must be a collection of method names")
         methods = tuple(sorted({str(method).upper() for method in self.allowed_methods}))
         if not methods or not set(methods).issubset({"GET", "OPTIONS"}):
             raise ValueError("only GET and OPTIONS are supported by this passive grant")
@@ -75,6 +79,8 @@ class AuthorizationGrant:
         requested_hosts = normalize_host_list(hosts)
         if not set(requested_hosts).issubset(self.allowed_hosts):
             raise PermissionError("requested hostname is outside the exact authorization scope")
+        if isinstance(methods, (str, bytes)):
+            raise TypeError("methods must be a collection of method names")
         requested_methods = {str(method).upper() for method in methods}
         if not requested_methods.issubset(self.allowed_methods):
             raise PermissionError("HTTP method is not authorized by this grant")
