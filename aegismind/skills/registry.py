@@ -29,10 +29,16 @@ class Skill:
             raise ValueError("unsupported skill action_class")
         if type(self.network_access) is not bool:
             raise TypeError("network_access must be boolean")
+        if self.runner is not None and not callable(self.runner):
+            raise TypeError("runner must be callable when provided")
+        if isinstance(self.capabilities, (str, bytes)):
+            raise TypeError("capabilities must be a collection of capability names")
         if self.action_class == "network_passive" and not self.network_access:
             raise ValueError("network_passive skills must declare network_access=True")
         if self.network_access and self.action_class == "local_passive":
             raise ValueError("local_passive skills cannot declare network access")
+        if self.network_access and self.estimated_requests < 1:
+            raise ValueError("network skills must declare a positive estimated_requests budget")
         for name in ("estimated_requests", "estimated_runtime_seconds", "estimated_memory_mb"):
             value = getattr(self, name)
             minimum = 0 if name == "estimated_requests" else 1
@@ -75,7 +81,8 @@ class SkillRegistry:
 
     def run(
         self, skill_id: str, *, approved: bool = False,
-        authorization_grant=None, allowed_hosts=(), now=None, **kwargs
+        authorization_grant=None, allowed_hosts=(), authorization_methods=("GET", "OPTIONS"),
+        now=None, **kwargs
     ):
         skill = self.get(skill_id)
         if not approved:
@@ -88,7 +95,7 @@ class SkillRegistry:
             if authorization_grant is None:
                 raise PermissionError("a current exact-host authorization grant is required")
             authorization_grant.validate(
-                allowed_hosts, methods=("GET", "OPTIONS"),
+                allowed_hosts, methods=authorization_methods,
                 request_count=skill.estimated_requests, now=now,
             )
         return skill.runner(**kwargs)
