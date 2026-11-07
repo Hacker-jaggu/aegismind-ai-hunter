@@ -28,8 +28,8 @@ class Scanner:
         self.session.headers.update({"User-Agent": "AegisMind-AI-Hunter/0.2 (+authorized security assessment)"})
 
     def request(self, method, url):
-        if method not in {"GET", "OPTIONS", "HEAD"}:
-            raise ValueError("Only safe observation methods are enabled")
+        if method not in {"GET", "OPTIONS"}:
+            raise ValueError("Only GET and OPTIONS observation methods are enabled")
         if not in_scope(url, self.allowed_hosts):
             raise ValueError("Out-of-scope URL blocked")
         time.sleep(self.delay)
