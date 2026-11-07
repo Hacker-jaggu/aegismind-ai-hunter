@@ -232,3 +232,28 @@ def test_scheduler_cannot_outlive_authorization_grant():
             max_runs=5, request_budget=10, opt_in=True,
             expires_at=NOW + timedelta(days=3), now=NOW,
         )
+
+
+def test_cli_plan_only_does_not_start_network_scan(monkeypatch, capsys):
+    import sys
+    from aegismind import __main__ as cli
+
+    class FakeScanner:
+        def __init__(self, **kwargs):
+            self.max_urls = 2
+            self.timeout = 2.0
+            self.delay = 0.5
+
+        def run(self, start_url):
+            raise AssertionError("plan-only mode must not make network requests")
+
+    monkeypatch.setattr(cli, "Scanner", FakeScanner)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["aegismind", "--url", "https://example.test/",
+         "--allow-host", "example.test", "--plan-only"],
+    )
+    cli.main()
+    output = capsys.readouterr().out
+    assert "Decision plan:" in output
+    assert "Plan-only mode: no network requests were made." in output
