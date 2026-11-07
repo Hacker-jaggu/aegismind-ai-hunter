@@ -42,6 +42,8 @@ class PlanRequest:
     def __post_init__(self):
         if not isinstance(self.goal, str) or not self.goal.strip():
             raise ValueError("a concrete goal is required")
+        if isinstance(self.required_capabilities, (str, bytes)):
+            raise TypeError("required_capabilities must be a collection of capability names")
         capabilities = tuple(sorted({str(item).strip().lower() for item in self.required_capabilities if str(item).strip()}))
         if not capabilities:
             raise ValueError("at least one required capability is needed")
